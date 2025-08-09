@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+# ───────────────────────────────────────────────────────────────────────
+# App & Imports
+# ───────────────────────────────────────────────────────────────────────
+from datetime import date, datetime
+import pandas as pd
+import streamlit as st
+
+# Pull the data model and calculators from ss.py
+from ss import (
+    Person,
+    compute_age,
+    project_social_security,
+)
+
+st.set_page_config(page_title="Household Longevity", layout="centered")
+
+# Session state: gate heavy calculations until user clicks Calculate
+if "do_calc" not in st.session_state:
+    st.session_state["do_calc"] = False
+
+#
+# ═══════════════════════════════════════════════════════════════════════
+# SECTION: Streamlit Sidebar Inputs
+# ═══════════════════════════════════════════════════════════════════════
+st.title("Household Ages & Life Expectancy")
+
+st.sidebar.header("People")
+n_people = st.sidebar.number_input("How many people?", min_value=1, max_value=6, value=2, step=1)
+
+# Action buttons
+calc_col, reset_col = st.sidebar.columns(2)
+with calc_col:
+    if st.button("Calculate", type="primary"):
+        st.session_state["do_calc"] = True
+with reset_col:
+    if st.button("Clear", help="Clear results so changes don't auto-calc"):
+        st.session_state["do_calc"] = False
+
+people: list[Person] = []
+for i in range(int(n_people)):
+    with st.sidebar.expander(f"Person {i+1}", expanded=(i == 0)):
+        name = st.text_input(f"Name {i+1}", key=f"name_{i}")
+
+        dob_str = st.text_input(
+            f"Date of Birth {i+1} (dd/mm/yyyy)",
+            value="01/01/1940",
+            key=f"dob_{i}_str",
+            help="Enter day/month/year, e.g., 05/11/1958"
+        )
+        # Parse DOB in dd/mm/yyyy format
+        try:
+            dob = datetime.strptime(dob_str.strip(), "%d/%m/%Y").date()
+            if dob > date.today():
+                st.warning("DOB is in the future—please correct.")
+        except ValueError:
+            st.error("Please enter DOB as dd/mm/yyyy (e.g., 05/11/1958).")
+            continue
+
+        # We interpret this as “they live THROUGH this age” (death occurs just before the next birthday).
+        # In ss.Person, eol_date is implemented as life_age + 1 so the last year pays up to (but not including) the month of death.
+        life_age = st.number_input(
+            f"Life expectancy (they will live through) {i+1}",
+            min_value=50, max_value=120, value=95, step=1, key=f"life_{i}"
+        )
+
+        st.markdown("**Social Security Claiming**")
+        col_y, col_m = st.columns(2)
+        with col_y:
+            claim_age_y = st.selectbox(
+                f"Claim age (years) {i+1}",
+                options=list(range(62, 71)),
+                index=5,  # defaults to 67
+                key=f"claimy_{i}"
+            )
+        with col_m:
+            claim_age_m = st.selectbox(
+                f"Claim age (months) {i+1}",
+                options=list(range(0, 12)),
+                index=0,
+                key=f"claimm_{i}"
+            )
+
+        pia = st.number_input(
+            f"PIA @ FRA (monthly) {i+1}",
+            min_value=0.0, value=3000.0, step=50.0, key=f"pia_{i}"
+        )
+
+        if name.strip():
+            people.append(
+                Person(
+                    name=name.strip(),
+                    dob=dob,
+                    life_age=int(life_age),
+                    claim_age_years=int(claim_age_y),
+                    claim_age_months=int(claim_age_m),
+                    pia_at_fra=float(pia),
+                )
+            )
+
+#
+# ═══════════════════════════════════════════════════════════════════════
+# SECTION: Summary Output Table (Ages & EOL)
+# ═══════════════════════════════════════════════════════════════════════
+if people and st.session_state.get("do_calc"):
+    rows = []
+    today = date.today()
+
+    for p in people:
+        age_now = compute_age(p.dob, today)
+        years_left = max(p.life_age - age_now, 0)
+        rows.append({
+            "Name": p.name,
+            "DOB": p.dob.strftime("%d/%m/%Y"),
+            "Current Age": age_now,
+            "Life Expectancy": p.life_age,
+            "Years Remaining": years_left,
+            "End-of-Life Date": p.eol_date.strftime("%Y-%m-%d"),
+            "Claim Age (y:m)": f"{p.claim_age_years}:{p.claim_age_months:02d}",
+            "FRA (y:m)": f"{p.fra[0]}:{p.fra[1]:02d}",
+            "PIA @ FRA (monthly)": round(p.pia_at_fra, 2),
+        })
+
+        if p.life_age < age_now:
+            st.sidebar.warning(f"⚠️ {p.name}: life expectancy ({p.life_age}) is below current age ({age_now}).")
+
+    df = pd.DataFrame(rows)
+    st.subheader("Summary")
+    st.dataframe(df, hide_index=True, use_container_width=True)
+
+    # ───────────────────────────────────────────────────────────────────
+    # SUBSECTION: Ages by Future Year (Projection Grid)
+    # ───────────────────────────────────────────────────────────────────
+    if not df.empty:
+        max_years = int(df["Years Remaining"].max())
+        if max_years > 0:
+            future_years = list(range(1, max_years + 1))
+
+            # Build a column per person with ages each future year; blank after life age
+            ages_by_year: dict[str, list[int | None]] = {}
+            for _, r in df.iterrows():
+                name = r["Name"]
+                age_now = int(r["Current Age"])
+                life_age = int(r["Life Expectancy"])
+                series: list[int | None] = []
+                for y in future_years:
+                    age_at = age_now + y
+                    series.append(age_at if age_at <= life_age else None)
+                ages_by_year[name] = series
+
+            future_df = pd.DataFrame({"Year": future_years})
+            for name, series in ages_by_year.items():
+                future_df[name] = series
+
+            # Transpose so years become columns and people become rows
+            future_df = future_df.set_index("Year").T.reset_index().rename(columns={"index": "Name"})
+
+            st.subheader("Ages by Future Year")
+            st.dataframe(future_df, hide_index=True, use_container_width=True)
+        else:
+            st.info("No future years to display — all entries have zero years remaining.")
+
+    #
+    # ═══════════════════════════════════════════════════════════════════
+    # SECTION: Social Security Projection (Annual, No COLA)
+    # ═══════════════════════════════════════════════════════════════════
+    st.subheader("Social Security — Annual Projection (no COLA)")
+
+    max_years = int(df["Years Remaining"].max())
+    if max_years > 0:
+        ss_df = project_social_security(people, start=date.today(), years=max_years)
+        # Always show years as rows
+        st.dataframe(ss_df, hide_index=True, use_container_width=True)
+    else:
+        st.info("No Social Security rows to display (check claim ages and life expectancy).")
+
+    #
+    # ═══════════════════════════════════════════════════════════════════
+    # FOOTNOTE: Modeling Assumptions & Notes
+    # ═══════════════════════════════════════════════════════════════════
+    st.caption(
+        "Notes: Current age is calculated from today’s date and the DOB. "
+        "End-of-life date reflects the interpretation that a person lives THROUGH the entered age "
+        "(death occurs just before the next birthday). "
+        "Social Security calculations use simplified but realistic monthly rules: no benefit is payable "
+        "for the month of death; spousal benefits stop at death; survivor benefits begin the month after "
+        "death if the survivor is age-eligible; early-claim reductions and delayed credits apply, with "
+        "delayed credits capped at age 70."
+    )
+else:
+    if not people:
+        st.info("Use the sidebar to add at least one person, then click **Calculate**.")
+    elif not st.session_state.get("do_calc"):
+        st.info("Inputs are ready. Click **Calculate** in the sidebar to run the projections.")
