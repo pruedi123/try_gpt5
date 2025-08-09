@@ -100,12 +100,12 @@ for i in range(int(n_people)):
     with st.sidebar.expander(f"Person {i+1} — Basic Info", expanded=(i == 0)):
         # Defaults for first two people
         if i == 0:
-            _def_name = "Paul"
-            _def_dob_str = "11/06/1959"  # dd/mm/yyyy → 11 June 1959
+            _def_name = "Bob"
+            _def_dob_str = "06/01/1959"  # dd/mm/yyyy → 11 June 1959
             _def_life = 85
         elif i == 1:
-            _def_name = "Cindy"
-            _def_dob_str = "05/22/1960"  # dd/mm/yyyy → 22 May 1960
+            _def_name = "Sue"
+            _def_dob_str = "09/15/1960"  # dd/mm/yyyy → 22 May 1960
             _def_life = 95
         else:
             _def_name = ""
