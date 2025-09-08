@@ -162,6 +162,9 @@ def project_social_security(people: list[Person], start: date, years: int) -> pd
             else:
                 own_window_end = own_death_first
             months_paid = clamp_months_in_year(claim_first, own_window_end, year_start, year_end_excl)
+            # Exclude month of death (no benefit in month of death)
+            if year_start <= own_death_first < year_end_excl:
+                months_paid = max(0, months_paid - 1)
             own_months[p.name] = months_paid
             own[p.name] = mo_at_claim[p.name] * months_paid
 
@@ -193,7 +196,8 @@ def project_social_security(people: list[Person], start: date, years: int) -> pd
             def add_surv(surv: Person, dec: Person, dec_death_first: date):
                 # full-year after death
                 if dec_death_first <= year_start:
-                    months_surv = months_between_firsts(year_end_excl, year_start)
+                    surv_start = max(year_start, add_months(dec_death_first, 1))
+                    months_surv = max(0, months_between_firsts(year_end_excl, surv_start))
                     if months_surv > 0:
                         surv_mo = survivor_annual(surv, dec, dec_death_first) / 12.0
                         own_mo = mo_at_claim[surv.name]
