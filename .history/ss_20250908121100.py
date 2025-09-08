@@ -214,16 +214,6 @@ def project_social_security(people: list[Person], start: date, years: int) -> pd
 
             add_surv(a, b, b_death); add_surv(b, a, a_death)
 
-        # Final guard: if this year starts AFTER the person's month of death, zero all benefits
-        for p in people:
-            death_first = first_of_month(eol_map[p.name])
-            # If the person is already deceased for the entirety of this year
-            if year_start >= add_months(death_first, 1):
-                own[p.name] = 0.0
-                spousal[p.name] = 0.0
-                total[p.name] = 0.0
-                own_months[p.name] = 0
-
         row = {"Year": y}
         for p in people:
             row[f"{p.name} Own"] = round(own[p.name], 2) or None
