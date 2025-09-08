@@ -60,11 +60,16 @@ from ss import (
     compute_age,
     project_social_security,
 )
-
+st.write("Social Security Calculator")
 st.set_page_config(page_title="Household Longevity", layout="centered")
+
 
 # Session state: gate heavy calculations until user clicks Calculate
 if "do_calc" not in st.session_state:
+    st.session_state["do_calc"] = False
+
+# Mark outputs as dirty whenever any input changes
+def _mark_dirty():
     st.session_state["do_calc"] = False
 
 #
@@ -74,7 +79,7 @@ if "do_calc" not in st.session_state:
 st.title("Household Ages & Life Expectancy")
 
 st.sidebar.header("People")
-n_people = st.sidebar.number_input("How many people?", min_value=1, max_value=6, value=2, step=1)
+n_people = st.sidebar.number_input("How many people?", min_value=1, max_value=6, value=2, step=1, on_change=_mark_dirty)
 
 # Action buttons
 calc_col, reset_col = st.sidebar.columns(2)
@@ -85,96 +90,138 @@ with reset_col:
     if st.button("Clear", help="Clear results so changes don't auto-calc"):
         st.session_state["do_calc"] = False
 
+
 people: list[Person] = []
+
+# ── BASIC INFO (for all people) ───────────────────────────────────────
+st.sidebar.markdown("### Basic Info (Name, DOB, Life Expectancy)")
+basic_info: list[dict] = []
 for i in range(int(n_people)):
-    with st.sidebar.expander(f"Person {i+1}", expanded=(i == 0)):
+    with st.sidebar.expander(f"Person {i+1} — Basic Info", expanded=(i == 0)):
         # Defaults for first two people
         if i == 0:
-            _def_name = "Paul"
-            _def_dob_str = "11/06/1959"  # dd/mm/yyyy → 11 June 1959
+            _def_name = "Bob"
+            _def_dob_str = "06/01/1959"  # dd/mm/yyyy → 11 June 1959
             _def_life = 85
-            _def_claim_y = 66
-            _def_claim_m = 10
-            _def_pia = 3500.0
         elif i == 1:
-            _def_name = "Cindy"
-            _def_dob_str = "22/05/1960"  # dd/mm/yyyy → 22 May 1960
+            _def_name = "Sue"
+            _def_dob_str = "09/15/1960"  # dd/mm/yyyy → 22 May 1960
             _def_life = 95
-            _def_claim_y = 66
-            _def_claim_m = 4
-            _def_pia = 1000.0
         else:
             _def_name = ""
             _def_dob_str = "01/01/1940"
             _def_life = 95
-            _def_claim_y = 67
-            _def_claim_m = 0
-            _def_pia = 3000.0
 
-        name = st.text_input(f"Name {i+1}", value=_def_name, key=f"name_{i}")
-
+        name = st.text_input(f"Name {i+1}", value=_def_name, key=f"name_{i}", on_change=_mark_dirty)
         dob_str = st.text_input(
             f"Date of Birth {i+1} (dd/mm/yyyy)",
             value=_def_dob_str,
             key=f"dob_{i}_str",
-            help="Enter day/month/year, e.g., 05/11/1958"
+            help="Enter day/month/year, e.g., 05/11/1958",
+            on_change=_mark_dirty,
         )
         # Parse DOB in dd/mm/yyyy (also accepts d-m-yyyy and d/m/yy)
+        dob = None
+        dob_error = None
         try:
             dob = _parse_dob_ddmmyyyy(dob_str)
             if dob > date.today():
                 st.warning("DOB is in the future—please correct.")
             else:
                 st.caption(f"Parsed DOB → {dob.strftime('%d/%m/%Y')} (ISO {dob.isoformat()})")
-        except ValueError:
+        except ValueError as e:
+            dob_error = str(e)
             st.error(f"Could not parse DOB '{dob_str}'. Enter as day/month/year, e.g., 05/11/1958 (also accepts 5-11-58).")
-            continue
-
-        # We interpret this as “they live THROUGH this age” (death occurs just before the next birthday).
-        # In ss.Person, eol_date is implemented as life_age + 1 so the last year pays up to (but not including) the month of death.
         life_age = st.number_input(
             f"Life expectancy (they will live through) {i+1}",
-            min_value=50, max_value=120, value=int(_def_life), step=1, key=f"life_{i}"
+            min_value=50, max_value=120, value=int(_def_life), step=1, key=f"life_{i}", on_change=_mark_dirty
         )
+        basic_info.append({
+            "name": name.strip(),
+            "dob": dob,
+            "life_age": int(life_age),
+            "dob_error": dob_error,
+        })
 
-        st.markdown("**Social Security Claiming**")
+# ── SOCIAL SECURITY CLAIMING (for all people) ─────────────────────────
+st.sidebar.markdown("### Social Security Claiming (for all)")
+claim_info: list[dict] = []
+for i in range(int(n_people)):
+    with st.sidebar.expander(f"Person {i+1} — Social Security", expanded=(i == 0)):
+        # Defaults for first two people (claim age + PIA)
+        if i == 0:
+            _def_claim_y = 66
+            _def_claim_m = 10
+            _def_pia = 3000.0
+        elif i == 1:
+            _def_claim_y = 66
+            _def_claim_m = 4
+            _def_pia = 1000.0
+        else:
+            _def_claim_y = 67
+            _def_claim_m = 0
+            _def_pia = 3000.0
+
+        claim_year_options = list(range(62, 71))
+        claim_month_options = list(range(0, 12))
+        _year_index = claim_year_options.index(int(_def_claim_y)) if int(_def_claim_y) in claim_year_options else claim_year_options.index(67)
+        _month_index = claim_month_options.index(int(_def_claim_m)) if int(_def_claim_m) in claim_month_options else 0
+
         col_y, col_m = st.columns(2)
         with col_y:
-            claim_year_options = list(range(62, 71))
-            claim_month_options = list(range(0, 12))
-            _year_index = claim_year_options.index(int(_def_claim_y)) if int(_def_claim_y) in claim_year_options else claim_year_options.index(67)
-            _month_index = claim_month_options.index(int(_def_claim_m)) if int(_def_claim_m) in claim_month_options else 0
-
             claim_age_y = st.selectbox(
                 f"Claim age (years) {i+1}",
                 options=claim_year_options,
                 index=_year_index,
-                key=f"claimy_{i}"
+                key=f"claimy_{i}",
+                on_change=_mark_dirty,
             )
         with col_m:
             claim_age_m = st.selectbox(
                 f"Claim age (months) {i+1}",
                 options=claim_month_options,
                 index=_month_index,
-                key=f"claimm_{i}"
+                key=f"claimm_{i}",
+                on_change=_mark_dirty,
             )
 
         pia = st.number_input(
             f"PIA @ FRA (monthly) {i+1}",
-            min_value=0.0, value=float(_def_pia), step=50.0, key=f"pia_{i}"
+            min_value=0.0, value=float(_def_pia), step=50.0, key=f"pia_{i}", on_change=_mark_dirty
         )
 
-        if name.strip():
-            people.append(
-                Person(
-                    name=name.strip(),
-                    dob=dob,
-                    life_age=int(life_age),
-                    claim_age_years=int(claim_age_y),
-                    claim_age_months=int(claim_age_m),
-                    pia_at_fra=float(pia),
-                )
-            )
+        claim_info.append({
+            "claim_age_y": int(claim_age_y),
+            "claim_age_m": int(claim_age_m),
+            "pia": float(pia),
+        })
+
+# ── Output Visibility Toggles (moved to bottom of sidebar) ────────────
+st.sidebar.markdown("### Output Visibility")
+show_summary = st.sidebar.radio("Show Summary table?", ["Yes", "No"], index=0, key="show_summary")
+show_ages = st.sidebar.radio("Show Ages by Future Year?", ["Yes", "No"], index=0, key="show_ages")
+show_ss = st.sidebar.radio("Show Social Security Projection?", ["Yes", "No"], index=0, key="show_ss")
+
+# ── Assemble Person objects from the two sections ─────────────────────
+people = []
+for i in range(int(n_people)):
+    b = basic_info[i]
+    c = claim_info[i] if i < len(claim_info) else {"claim_age_y": 67, "claim_age_m": 0, "pia": 0.0}
+    if not b["name"]:
+        continue
+    if b["dob"] is None or b.get("dob_error"):
+        # Skip assembling this person due to DOB parse issues
+        continue
+    people.append(
+        Person(
+            name=b["name"],
+            dob=b["dob"],
+            life_age=b["life_age"],
+            claim_age_years=c["claim_age_y"],
+            claim_age_months=c["claim_age_m"],
+            pia_at_fra=c["pia"],
+        )
+    )
 
 #
 # ═══════════════════════════════════════════════════════════════════════
@@ -203,18 +250,28 @@ if people and st.session_state.get("do_calc"):
             st.sidebar.warning(f"⚠️ {p.name}: life expectancy ({p.life_age}) is below current age ({age_now}).")
 
     df = pd.DataFrame(rows)
-    st.subheader("Summary")
-    st.dataframe(df, hide_index=True, use_container_width=True)
+
+    # Keep underlying numbers; only display currency without decimals
+    for col in ["Current Age", "Life Expectancy", "Years Remaining"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").round(0).astype("Int64")
+
+    if show_summary == "Yes":
+        st.subheader("Summary")
+        display_df = df.copy()
+        if "PIA @ FRA (monthly)" in display_df.columns:
+            display_df["PIA @ FRA (monthly)"] = pd.to_numeric(display_df["PIA @ FRA (monthly)"], errors="coerce").apply(
+                lambda x: f"${x:,.0f}" if pd.notna(x) else ""
+            )
+        st.dataframe(display_df, hide_index=True, use_container_width=True)
 
     # ───────────────────────────────────────────────────────────────────
     # SUBSECTION: Ages by Future Year (Projection Grid)
     # ───────────────────────────────────────────────────────────────────
-    if not df.empty:
+    if show_ages == "Yes" and not df.empty:
         max_years = int(df["Years Remaining"].max())
         if max_years > 0:
             future_years = list(range(1, max_years + 1))
-
-            # Build a column per person with ages each future year; blank after life age
             ages_by_year: dict[str, list[int | None]] = {}
             for _, r in df.iterrows():
                 name = r["Name"]
@@ -225,14 +282,14 @@ if people and st.session_state.get("do_calc"):
                     age_at = age_now + y
                     series.append(age_at if age_at <= life_age else None)
                 ages_by_year[name] = series
-
             future_df = pd.DataFrame({"Year": future_years})
             for name, series in ages_by_year.items():
                 future_df[name] = series
-
-            # Transpose so years become columns and people become rows
             future_df = future_df.set_index("Year").T.reset_index().rename(columns={"index": "Name"})
-
+            for col in future_df.columns:
+                if col == "Name":
+                    continue
+                future_df[col] = future_df[col].apply(lambda x: int(x) if pd.notnull(x) else None)
             st.subheader("Ages by Future Year")
             st.dataframe(future_df, hide_index=True, use_container_width=True)
         else:
@@ -242,15 +299,24 @@ if people and st.session_state.get("do_calc"):
     # ═══════════════════════════════════════════════════════════════════
     # SECTION: Social Security Projection (Annual, No COLA)
     # ═══════════════════════════════════════════════════════════════════
-    st.subheader("Social Security — Annual Projection (no COLA)")
-
-    max_years = int(df["Years Remaining"].max())
-    if max_years > 0:
-        ss_df = project_social_security(people, start=date.today(), years=max_years)
-        # Always show years as rows
-        st.dataframe(ss_df, hide_index=True, use_container_width=True)
-    else:
-        st.info("No Social Security rows to display (check claim ages and life expectancy).")
+    if show_ss == "Yes":
+        st.subheader("Social Security — Annual Projection (no COLA)")
+        max_years = int(df["Years Remaining"].max())
+        if max_years > 0:
+            ss_df = project_social_security(people, start=date.today(), years=max_years)
+            currency_keys = ["Own", "Spousal", "Total SS", "OwnCalc", "Monthly@Claim", "Household Total SS"]
+            display_ss = ss_df.copy()
+            mpo_cols = [c for c in display_ss.columns if "MonthsPaidOwn" in c]
+            if mpo_cols:
+                display_ss = display_ss.drop(columns=mpo_cols)
+            for col in display_ss.columns:
+                if any(k in col for k in currency_keys):
+                    display_ss[col] = pd.to_numeric(display_ss[col], errors="coerce").apply(
+                        lambda x: f"${x:,.0f}" if pd.notna(x) else ""
+                    )
+            st.dataframe(display_ss, hide_index=True, use_container_width=True)
+        else:
+            st.info("No Social Security rows to display (check claim ages and life expectancy).")
 
     #
     # ═══════════════════════════════════════════════════════════════════
@@ -263,7 +329,11 @@ if people and st.session_state.get("do_calc"):
         "Social Security calculations use simplified but realistic monthly rules: no benefit is payable "
         "for the month of death; spousal benefits stop at death; survivor benefits begin the month after "
         "death if the survivor is age-eligible; early-claim reductions and delayed credits apply, with "
-        "delayed credits capped at age 70."
+        "delayed credits capped at age 70. "
+        "This calculator was created with the assistance of AI coding tools and appears to be accurate, "
+        "but no guarantees are made as to its correctness or completeness. It is for educational purposes only "
+        "and may not reflect actual SSA rules or benefits exactly. Please do not rely solely on this tool for "
+        "final decisions; confirm details directly with the Social Security Administration."
     )
 else:
     if not people:

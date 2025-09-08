@@ -329,8 +329,11 @@ if people and st.session_state.get("do_calc"):
         "Social Security calculations use simplified but realistic monthly rules: no benefit is payable "
         "for the month of death; spousal benefits stop at death; survivor benefits begin the month after "
         "death if the survivor is age-eligible; early-claim reductions and delayed credits apply, with "
-        "delayed credits capped at age 70."
-        "This is for educational purposes only and may not reflect actual SSA rules or benefits exactly. This is a very good estimater of benefits."
+        "delayed credits capped at age 70. "
+        "This calculator was created with the assistance of AI coding tools and appears to be accurate, "
+        "but no guarantees are made as to its correctness or completeness. It is for educational purposes only "
+        "and may not reflect actual SSA rules or benefits exactly. Please do not rely solely on this tool for "
+        "final decisions; confirm details directly with the Social Security Administration."
     )
 else:
     if not people:
