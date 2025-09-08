@@ -60,7 +60,7 @@ from ss import (
     compute_age,
     project_social_security,
 )
-st.write("Social Secuiry Calculator")
+st.write("Social Security Calculator")
 st.set_page_config(page_title="Household Longevity", layout="centered")
 
 
