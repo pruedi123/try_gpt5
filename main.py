@@ -106,11 +106,11 @@ for i in range(int(n_people)):
         elif i == 1:
             _def_name = "Sue"
             _def_dob_str = "09/15/1960"  # dd/mm/yyyy → 22 May 1960
-            _def_life = 95
+            _def_life = 89
         else:
             _def_name = ""
             _def_dob_str = "01/01/1940"
-            _def_life = 95
+            _def_life = 89
 
         name = st.text_input(f"Name {i+1}", value=_def_name, key=f"name_{i}", on_change=_mark_dirty)
         dob_str = st.text_input(
